@@ -21,7 +21,12 @@ class WP_FB_OneClick
         add_action('add_meta_boxes', array($this, 'add_meta_box'));
         add_action('admin_enqueue_scripts', array($this, 'enqueue_assets'));
         add_action('wp_ajax_wpfboc_post_to_facebook', array($this, 'ajax_post_to_facebook'));
+
+        // admin posts list column for 'post' post type
+        add_filter('manage_post_posts_columns', array($this, 'add_shared_column'), 20);
+        add_action('manage_post_posts_custom_column', array($this, 'render_shared_column'), 10, 2);
     }
+
 
     public function add_settings_page()
     {
@@ -153,14 +158,10 @@ class WP_FB_OneClick
 
         $link = get_permalink($post_id);
 
-        /**
-         * Build message (title + description + link)
-         */
-        $message = trim($title . "\n\n" . $description . "\n\n" . $link);
+        // Build message WITHOUT the direct link (Facebook will generate clickable preview)
+        $message = trim($title . "\n\n" . $description);
 
-        /**
-         * Hashtags (converted from tags)
-         */
+        // Hashtags (converted from tags)
         $max_hashtags = 10;
         $tag_names = wp_get_post_terms($post_id, 'post_tag', array('fields' => 'names'));
         $hashtags = array();
@@ -168,10 +169,8 @@ class WP_FB_OneClick
         if (! empty($tag_names)) {
             foreach ($tag_names as $t) {
                 if (count($hashtags) >= $max_hashtags) break;
-
                 $clean = preg_replace('/[^A-Za-z0-9]/', '', $t);
                 if (empty($clean)) continue;
-
                 $hashtags[] = '#' . $clean;
             }
         }
@@ -180,11 +179,8 @@ class WP_FB_OneClick
             $message .= "\n\n" . implode(' ', $hashtags);
         }
 
-        /**
-         * 📌 FINAL — Post link (Facebook generates clickable preview)
-         */
+        // Final: post link only (Facebook will build the full preview from OG tags)
         $endpoint = "https://graph.facebook.com/{$page_id}/feed";
-
         $body = [
             'message'      => $message,
             'link'         => $link,
@@ -197,6 +193,9 @@ class WP_FB_OneClick
         ]);
 
         if (is_wp_error($response)) {
+            // save as not shared
+            update_post_meta($post_id, 'wpfboc_shared', '0');
+            delete_post_meta($post_id, 'wpfboc_fb_post_id');
             wp_send_json_error('Failed to post: ' . $response->get_error_message());
         }
 
@@ -205,10 +204,56 @@ class WP_FB_OneClick
         $json = json_decode($resp, true);
 
         if ($code >= 200 && $code < 300 && ! empty($json['id'])) {
+            // Save shared status and FB post ID to post meta
+            update_post_meta($post_id, 'wpfboc_shared', '1');
+            update_post_meta($post_id, 'wpfboc_fb_post_id', sanitize_text_field($json['id']));
             wp_send_json_success('Post shared successfully! Post ID: ' . esc_html($json['id']));
         }
 
+        // If we reach here there was an error response from FB
+        update_post_meta($post_id, 'wpfboc_shared', '0');
+        delete_post_meta($post_id, 'wpfboc_fb_post_id');
+
         wp_send_json_error('Facebook error: ' . ($json['error']['message'] ?? $resp));
+    }
+    public function add_shared_column($columns)
+    {
+        // Insert the column after the date column (or at end)
+        $new = array();
+        foreach ($columns as $key => $title) {
+            $new[$key] = $title;
+            if ($key === 'date') {
+                $new['wpfboc_shared'] = 'FB Shared';
+            }
+        }
+        // If date not found, append
+        if (! isset($new['wpfboc_shared'])) {
+            $new['wpfboc_shared'] = 'FB Shared';
+        }
+        return $new;
+    }
+
+    public function render_shared_column($column, $post_id)
+    {
+        if ($column !== 'wpfboc_shared') return;
+
+        $status = get_post_meta($post_id, 'wpfboc_shared', true);
+        $fb_id  = get_post_meta($post_id, 'wpfboc_fb_post_id', true);
+
+        if ($status === '1') {
+            // Provide a link to the FB post if fb_id present
+            if (! empty($fb_id)) {
+                // Facebook returns ids like "{page_id}_{post_id}" — build a view URL
+                $fb_url = esc_url("https://www.facebook.com/{$fb_id}");
+                echo '<span style="color:green;font-weight:600;">Shared</span><br/><a href="' . $fb_url . '" target="_blank" rel="noopener">View</a>';
+            } else {
+                echo '<span style="color:green;font-weight:600;">Shared</span>';
+            }
+        } elseif ($status === '0') {
+            echo '<span style="color:#a00;">Not shared</span>';
+        } else {
+            echo '—';
+        }
     }
 
 
