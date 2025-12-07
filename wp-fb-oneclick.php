@@ -121,226 +121,262 @@ class WP_FB_OneClick
         wp_add_inline_style('wp-admin', '#wpfboc-result{font-size:13px;} #wpfboc-post-btn.loading{opacity:.6;}');
     }
 
-   public function ajax_post_to_facebook() {
-    if ( ! current_user_can( 'edit_posts' ) ) {
-        wp_send_json_error( 'Insufficient permissions' );
-    }
-
-    check_ajax_referer( 'wpfboc_ajax_nonce', 'nonce' );
-
-    $post_id = intval( $_POST['post_id'] ?? 0 );
-    if ( $post_id <= 0 ) {
-        wp_send_json_error( 'Invalid post ID' );
-    }
-
-    $opts = get_option( $this->option_name, array() );
-    $page_id    = $opts['page_id'] ?? '';
-    $page_token = $opts['page_token'] ?? '';
-
-    if ( empty( $page_id ) || empty( $page_token ) ) {
-        wp_send_json_error( 'Facebook Page ID or Token missing.' );
-    }
-
-    $post = get_post( $post_id );
-    if ( ! $post ) {
-        wp_send_json_error( 'Post not found.' );
-    }
-
-    // Yoast data
-    $title = get_post_meta( $post_id, '_yoast_wpseo_opengraph-title', true );
-    if ( empty( $title ) ) $title = get_the_title( $post );
-
-    $description = get_post_meta( $post_id, '_yoast_wpseo_opengraph-description', true );
-    if ( empty( $description ) ) {
-        $description = wp_trim_words( strip_tags( $post->post_content ), 30, '...' );
-    }
-
-    // image: Yoast OG image or featured image
-    $og_image = get_post_meta( $post_id, '_yoast_wpseo_opengraph-image', true );
-    if ( empty( $og_image ) && has_post_thumbnail( $post_id ) ) {
-        $thumb = wp_get_attachment_image_src( get_post_thumbnail_id( $post_id ), 'full' );
-        if ( $thumb ) $og_image = $thumb[0];
-    }
-
-    // Build caption WITHOUT the direct link (we'll add the link as a comment)
-    $message = trim( $title . "\n\n" . $description );
-
-    // Hashtags (from post tags)
-    $max_hashtags = 10;
-    $tag_names = wp_get_post_terms( $post_id, 'post_tag', array( 'fields' => 'names' ) );
-    $hashtags = array();
-    if ( ! empty( $tag_names ) && is_array( $tag_names ) ) {
-        foreach ( $tag_names as $t ) {
-            if ( count( $hashtags ) >= $max_hashtags ) break;
-            $clean = preg_replace( '/[^A-Za-z0-9]/', '', $t );
-            if ( empty( $clean ) ) continue;
-            $hashtags[] = '#' . $clean;
+    public function ajax_post_to_facebook()
+    {
+        if (! current_user_can('edit_posts')) {
+            wp_send_json_error('Insufficient permissions');
         }
-    }
-    if ( ! empty( $hashtags ) ) {
-        $message .= "\n\n" . implode( ' ', $hashtags );
-    }
 
-    // final link to put in comment
-    $link = get_permalink( $post_id );
+        check_ajax_referer('wpfboc_ajax_nonce', 'nonce');
 
-    // ----------------------------------------------------------
-    // If we have an image, upload as photo via multipart (source)
-    // ----------------------------------------------------------
-    if ( ! empty( $og_image ) ) {
+        $post_id = intval($_POST['post_id'] ?? 0);
+        if ($post_id <= 0) {
+            wp_send_json_error('Invalid post ID');
+        }
 
-        // try to download image
-        $image_data = wp_remote_get( esc_url_raw( $og_image ), array( 'timeout' => 30 ) );
+        $opts = get_option($this->option_name, array());
+        $page_id    = $opts['page_id'] ?? '';
+        $page_token = $opts['page_token'] ?? '';
 
-        if ( ! is_wp_error( $image_data ) ) {
-            $image_body = wp_remote_retrieve_body( $image_data );
-            $tmp = wp_tempnam( $og_image );
+        if (empty($page_id) || empty($page_token)) {
+            wp_send_json_error('Facebook Page ID or Token missing.');
+        }
 
-            if ( $tmp && file_put_contents( $tmp, $image_body ) ) {
+        $post = get_post($post_id);
+        if (! $post) {
+            wp_send_json_error('Post not found.');
+        }
 
-                // prepare cURL file
-                if ( class_exists( 'CURLFile' ) ) {
-                    $mime = function_exists( 'mime_content_type' ) ? mime_content_type( $tmp ) : 'image/jpeg';
-                    $cfile = new CURLFile( $tmp, $mime, basename( $tmp ) );
-                } else {
-                    $cfile = '@' . $tmp;
-                }
+        // Yoast data
+        $title = get_post_meta($post_id, '_yoast_wpseo_opengraph-title', true);
+        if (empty($title)) $title = get_the_title($post);
 
-                $photo_endpoint = "https://graph.facebook.com/{$page_id}/photos";
-                $payload = array(
-                    'access_token' => $page_token,
-                    'caption'      => $message,
-                    'source'       => $cfile,
-                );
+        $description = get_post_meta($post_id, '_yoast_wpseo_opengraph-description', true);
+        if (empty($description)) {
+            $description = wp_trim_words(strip_tags($post->post_content), 30, '...');
+        }
 
-                $ch = curl_init();
-                curl_setopt( $ch, CURLOPT_URL, $photo_endpoint );
-                curl_setopt( $ch, CURLOPT_POST, true );
-                curl_setopt( $ch, CURLOPT_POSTFIELDS, $payload );
-                curl_setopt( $ch, CURLOPT_RETURNTRANSFER, true );
-                curl_setopt( $ch, CURLOPT_TIMEOUT, 60 );
-                curl_setopt( $ch, CURLOPT_SSL_VERIFYPEER, true );
-                curl_setopt( $ch, CURLOPT_SSL_VERIFYHOST, 2 );
+        // image: Yoast OG image or featured image
+        $og_image = get_post_meta($post_id, '_yoast_wpseo_opengraph-image', true);
+        if (empty($og_image) && has_post_thumbnail($post_id)) {
+            $thumb = wp_get_attachment_image_src(get_post_thumbnail_id($post_id), 'full');
+            if ($thumb) $og_image = $thumb[0];
+        }
 
-                $resp_raw = curl_exec( $ch );
-                $curl_err = curl_error( $ch );
-                $curl_code = curl_getinfo( $ch, CURLINFO_HTTP_CODE );
-                curl_close( $ch );
+        // Build caption WITHOUT the direct link (we'll add the link as a comment)
+        $message = trim($title . "\n\n" . $description);
 
-                // cleanup temp file
-                @unlink( $tmp );
-
-                if ( $resp_raw !== false ) {
-                    $resp_json = json_decode( $resp_raw, true );
-
-                    if ( $curl_code >= 200 && $curl_code < 300 && ! empty( $resp_json['id'] ) ) {
-                        // photo posted — now add the post link as a comment on that photo post
-                        $fb_post_id = sanitize_text_field( $resp_json['id'] );
-
-                        // post comment: /{photo_id}/comments
-                        $comment_endpoint = "https://graph.facebook.com/{$fb_post_id}/comments";
-                        $comment_body = array(
-                            'message'      => $link,
-                            'access_token' => $page_token,
-                        );
-
-                        $comment_resp = wp_remote_post( $comment_endpoint, array( 'timeout' => 20, 'body' => $comment_body ) );
-
-                        // Evaluate comment result (best-effort) — even if comment fails, consider post success
-                        $comment_ok = false;
-                        if ( ! is_wp_error( $comment_resp ) ) {
-                            $comment_code = wp_remote_retrieve_response_code( $comment_resp );
-                            $comment_body_raw = wp_remote_retrieve_body( $comment_resp );
-                            $comment_json = json_decode( $comment_body_raw, true );
-                            if ( $comment_code >= 200 && $comment_code < 300 && ! empty( $comment_json['id'] ) ) {
-                                $comment_ok = true;
-                            }
-                        }
-
-                        // save meta: shared, fb post id, timestamp
-                        update_post_meta( $post_id, 'wpfboc_shared', '1' );
-                        update_post_meta( $post_id, 'wpfboc_fb_post_id', $fb_post_id );
-                        $now = current_time( 'mysql' );
-                        update_post_meta( $post_id, 'wpfboc_shared_at', $now );
-
-                        // return success message; include comment status info
-                        $msg = 'Photo posted successfully! Post ID: ' . esc_html( $fb_post_id );
-                        if ( ! $comment_ok ) {
-                            $msg .= ' (Link comment failed—link may not appear in comments.)';
-                        }
-                        wp_send_json_success( $msg );
-                    } else {
-                        // photo upload error returned by FB
-                        $err = $resp_json['error']['message'] ?? $resp_raw;
-                        update_post_meta( $post_id, 'wpfboc_shared', '0' );
-                        delete_post_meta( $post_id, 'wpfboc_fb_post_id' );
-                        delete_post_meta( $post_id, 'wpfboc_shared_at' );
-                        wp_send_json_error( 'Photo upload error: ' . $err );
-                    }
-                } else {
-                    // curl execution error
-                    update_post_meta( $post_id, 'wpfboc_shared', '0' );
-                    delete_post_meta( $post_id, 'wpfboc_fb_post_id' );
-                    delete_post_meta( $post_id, 'wpfboc_shared_at' );
-                    wp_send_json_error( 'Photo upload failed: ' . $curl_err );
-                }
+        // Hashtags (from post tags)
+        $max_hashtags = 10;
+        $tag_names = wp_get_post_terms($post_id, 'post_tag', array('fields' => 'names'));
+        $hashtags = array();
+        if (! empty($tag_names) && is_array($tag_names)) {
+            foreach ($tag_names as $t) {
+                if (count($hashtags) >= $max_hashtags) break;
+                $clean = preg_replace('/[^A-Za-z0-9]/', '', $t);
+                if (empty($clean)) continue;
+                $hashtags[] = '#' . $clean;
             }
         }
+        if (! empty($hashtags)) {
+            $message .= "\n\n" . implode(' ', $hashtags);
+        }
 
-        // If we reached here, download or file write failed — treat as failure
-        update_post_meta( $post_id, 'wpfboc_shared', '0' );
-        delete_post_meta( $post_id, 'wpfboc_fb_post_id' );
-        delete_post_meta( $post_id, 'wpfboc_shared_at' );
-        wp_send_json_error( 'Unable to download or prepare image for upload.' );
+        // final link to put in comment
+        $link = get_permalink($post_id);
+
+        // ----------------------------------------------------------
+        // If we have an image, upload as photo via multipart (source)
+        // ----------------------------------------------------------
+        if (! empty($og_image)) {
+
+            // try to download image
+            $image_data = wp_remote_get(esc_url_raw($og_image), array('timeout' => 30));
+
+            if (! is_wp_error($image_data)) {
+                $image_body = wp_remote_retrieve_body($image_data);
+                $tmp = wp_tempnam($og_image);
+
+                if ($tmp && file_put_contents($tmp, $image_body)) {
+
+                    // prepare cURL file
+                    if (class_exists('CURLFile')) {
+                        $mime = function_exists('mime_content_type') ? mime_content_type($tmp) : 'image/jpeg';
+                        $cfile = new CURLFile($tmp, $mime, basename($tmp));
+                    } else {
+                        $cfile = '@' . $tmp;
+                    }
+
+                    $photo_endpoint = "https://graph.facebook.com/{$page_id}/photos";
+                    $payload = array(
+                        'access_token' => $page_token,
+                        'caption'      => $message,
+                        'source'       => $cfile,
+                    );
+
+                    $ch = curl_init();
+                    curl_setopt($ch, CURLOPT_URL, $photo_endpoint);
+                    curl_setopt($ch, CURLOPT_POST, true);
+                    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+
+                    $resp_raw = curl_exec($ch);
+                    $curl_err = curl_error($ch);
+                    $curl_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+
+                    // cleanup temp file
+                    @unlink($tmp);
+
+                    if ($resp_raw !== false) {
+                        $resp_json = json_decode($resp_raw, true);
+
+                        if ($curl_code >= 200 && $curl_code < 300 && ! empty($resp_json['id'])) {
+                            // photo posted — now add the post link as a comment on that photo post
+                            $fb_post_id = sanitize_text_field($resp_json['id']);
+
+                            // post comment: /{photo_id}/comments
+                            $comment_endpoint = "https://graph.facebook.com/{$fb_post_id}/comments";
+                            $comment_body = array(
+                                'message'      => $link,
+                                'access_token' => $page_token,
+                            );
+
+                            // Try multiple times (short wait) because FB may need a moment to process the new photo
+                            $attempts = 5;
+                            $comment_ok = false;
+                            $last_comment_error = '';
+                            $comment_id = '';
+
+                            for ($i = 0; $i < $attempts; $i++) {
+                                // small delay before retries (no delay on first try)
+                                if ($i > 0) {
+                                    sleep(1); // 1 second delay; increase if needed
+                                }
+
+                                $comment_resp = wp_remote_post($comment_endpoint, array('timeout' => 20, 'body' => $comment_body));
+
+                                if (is_wp_error($comment_resp)) {
+                                    $last_comment_error = 'WP error: ' . $comment_resp->get_error_message();
+                                    continue;
+                                }
+
+                                $comment_code = wp_remote_retrieve_response_code($comment_resp);
+                                $comment_body_raw = wp_remote_retrieve_body($comment_resp);
+                                $comment_json = json_decode($comment_body_raw, true);
+
+                                if ($comment_code >= 200 && $comment_code < 300 && ! empty($comment_json['id'])) {
+                                    $comment_ok = true;
+                                    $comment_id = sanitize_text_field($comment_json['id']);
+                                    break;
+                                }
+
+                                // Save last error message from FB response (if any)
+                                if (! empty($comment_json['error']['message'])) {
+                                    $last_comment_error = 'FB: ' . $comment_json['error']['message'];
+                                } else {
+                                    $last_comment_error = 'HTTP ' . $comment_code . ' — ' . substr($comment_body_raw, 0, 400);
+                                }
+                            }
+
+                            // Save comment status meta (best-effort)
+                            if ($comment_ok) {
+                                update_post_meta($post_id, 'wpfboc_comment_ok', '1');
+                                update_post_meta($post_id, 'wpfboc_comment_id', $comment_id);
+                            } else {
+                                update_post_meta($post_id, 'wpfboc_comment_ok', '0');
+                                delete_post_meta($post_id, 'wpfboc_comment_id');
+                            }
+
+                            // save meta: shared, fb post id, timestamp
+                            update_post_meta($post_id, 'wpfboc_shared', '1');
+                            update_post_meta($post_id, 'wpfboc_fb_post_id', $fb_post_id);
+                            $now = current_time('mysql');
+                            update_post_meta($post_id, 'wpfboc_shared_at', $now);
+
+                            // return success message; include comment status info
+                            $msg = 'Photo posted successfully! Post ID: ' . esc_html($fb_post_id);
+                            if (! $comment_ok) {
+                                $msg .= ' (Link comment failed—link may not appear in comments.)';
+                            }
+                            wp_send_json_success($msg);
+                        } else {
+                            // photo upload error returned by FB
+                            $err = $resp_json['error']['message'] ?? $resp_raw;
+                            update_post_meta($post_id, 'wpfboc_shared', '0');
+                            delete_post_meta($post_id, 'wpfboc_fb_post_id');
+                            delete_post_meta($post_id, 'wpfboc_shared_at');
+                            wp_send_json_error('Photo upload error: ' . $err);
+                        }
+                    } else {
+                        // curl execution error
+                        update_post_meta($post_id, 'wpfboc_shared', '0');
+                        delete_post_meta($post_id, 'wpfboc_fb_post_id');
+                        delete_post_meta($post_id, 'wpfboc_shared_at');
+                        wp_send_json_error('Photo upload failed: ' . $curl_err);
+                    }
+                }
+            }
+
+            // If we reached here, download or file write failed — treat as failure
+            update_post_meta($post_id, 'wpfboc_shared', '0');
+            delete_post_meta($post_id, 'wpfboc_fb_post_id');
+            delete_post_meta($post_id, 'wpfboc_shared_at');
+            wp_send_json_error('Unable to download or prepare image for upload.');
+        }
+
+        // If no image present, we cannot create the photo post — return error
+        update_post_meta($post_id, 'wpfboc_shared', '0');
+        delete_post_meta($post_id, 'wpfboc_fb_post_id');
+        delete_post_meta($post_id, 'wpfboc_shared_at');
+        wp_send_json_error('No image found for this post; photo post not created.');
     }
 
-    // If no image present, we cannot create the photo post — return error
-    update_post_meta( $post_id, 'wpfboc_shared', '0' );
-    delete_post_meta( $post_id, 'wpfboc_fb_post_id' );
-    delete_post_meta( $post_id, 'wpfboc_shared_at' );
-    wp_send_json_error( 'No image found for this post; photo post not created.' );
-}
-
-  public function add_shared_column( $columns ) {
-    $new = array();
-    foreach ( $columns as $key => $title ) {
-        $new[ $key ] = $title;
-        if ( $key === 'date' ) {
+    public function add_shared_column($columns)
+    {
+        $new = array();
+        foreach ($columns as $key => $title) {
+            $new[$key] = $title;
+            if ($key === 'date') {
+                $new['wpfboc_shared'] = 'FB Shared';
+            }
+        }
+        if (! isset($new['wpfboc_shared'])) {
             $new['wpfboc_shared'] = 'FB Shared';
         }
+        return $new;
     }
-    if ( ! isset( $new['wpfboc_shared'] ) ) {
-        $new['wpfboc_shared'] = 'FB Shared';
-    }
-    return $new;
-}
 
-public function render_shared_column( $column, $post_id ) {
-    if ( $column !== 'wpfboc_shared' ) return;
+    public function render_shared_column($column, $post_id)
+    {
+        if ($column !== 'wpfboc_shared') return;
 
-    $status = get_post_meta( $post_id, 'wpfboc_shared', true );
-    $fb_id  = get_post_meta( $post_id, 'wpfboc_fb_post_id', true );
-    $shared_at = get_post_meta( $post_id, 'wpfboc_shared_at', true );
+        $status = get_post_meta($post_id, 'wpfboc_shared', true);
+        $fb_id  = get_post_meta($post_id, 'wpfboc_fb_post_id', true);
+        $shared_at = get_post_meta($post_id, 'wpfboc_shared_at', true);
 
-    if ( $status === '1' ) {
-        $out = '<span style="color:green;font-weight:600;">Shared</span>';
-        if ( ! empty( $shared_at ) ) {
-            // show admin-local time nicely
-            $dt = date_i18n( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), strtotime( $shared_at ) );
-            $out .= '<br/><small style="color:#666;">' . esc_html( $dt ) . '</small>';
+        if ($status === '1') {
+            $out = '<span style="color:green;font-weight:600;">Shared</span>';
+            if (! empty($shared_at)) {
+                // show admin-local time nicely
+                $dt = date_i18n(get_option('date_format') . ' ' . get_option('time_format'), strtotime($shared_at));
+                $out .= '<br/><small style="color:#666;">' . esc_html($dt) . '</small>';
+            }
+            if (! empty($fb_id)) {
+                // Build FB URL — Facebook accepts either full ID or page_post id; try both patterns
+                $fb_url = esc_url("https://www.facebook.com/{$fb_id}");
+                $out .= '<br/><a href="' . $fb_url . '" target="_blank" rel="noopener">View</a>';
+            }
+            echo $out;
+        } elseif ($status === '0') {
+            echo '<span style="color:#a00;">Not shared</span>';
+        } else {
+            echo '—';
         }
-        if ( ! empty( $fb_id ) ) {
-            // Build FB URL — Facebook accepts either full ID or page_post id; try both patterns
-            $fb_url = esc_url( "https://www.facebook.com/{$fb_id}" );
-            $out .= '<br/><a href="' . $fb_url . '" target="_blank" rel="noopener">View</a>';
-        }
-        echo $out;
-    } elseif ( $status === '0' ) {
-        echo '<span style="color:#a00;">Not shared</span>';
-    } else {
-        echo '—';
     }
-}
 
 
 
